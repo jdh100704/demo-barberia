@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Clock, MapPin, Check, ChevronRight, ChevronLeft, Phone, User, Mail, MessageSquare, Star, Users, Scissors } from "lucide-react";
+import { Clock, MapPin, Check, ChevronRight, ChevronLeft, Phone, User, Mail, MessageSquare, Star, Users, Scissors, Loader2 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600&display=swap');`;
 
@@ -9,6 +10,8 @@ const BUSINESS = {
   name: "Tu Barbería",
   address: "Dirección de ejemplo, Madrid",
 };
+
+const TELEFONO_BARBERIA = "34600000000"; // sustituye por el número real cuando lo tengas
 
 type Service = { id: string; name: string; desc: string; price: number; duration: number };
 type ServiceGroup = { category: string; items: Service[] };
@@ -110,6 +113,8 @@ export default function BookingApp() {
   const [time, setTime] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({ name: "", phone: "", email: "", notes: "" });
   const [done, setDone] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const [errorGuardado, setErrorGuardado] = useState<string | null>(null);
 
   const days = useMemo(() => nextDays(10), []);
   const slots = useMemo(() => (day ? timeSlots(day.key) : []), [day]);
@@ -130,13 +135,51 @@ export default function BookingApp() {
     false,
   ][step];
 
+  // Guarda la reserva en Supabase y, si todo va bien, muestra la pantalla de confirmación
+  const confirmarReserva = async () => {
+    setGuardando(true);
+    setErrorGuardado(null);
+
+    const { error } = await supabase.from("reservas").insert([
+      {
+        nombre_cliente: form.name,
+        telefono: form.phone,
+        email: form.email || null,
+        notas: form.notes || null,
+        servicios: cart.map((s) => ({ nombre: s.name, precio: s.price })), // se guarda como jsonb
+        barbero: chosenBarber.name,
+        fecha: day ? `${day.label} ${day.month}` : "",
+        hora: time ?? "",
+        total,
+        duracion_min: totalDuration,
+      },
+    ]);
+
+    setGuardando(false);
+
+    if (error) {
+      console.error("Error al guardar la reserva:", error);
+      setErrorGuardado("No se pudo guardar la reserva. Inténtalo de nuevo.");
+      return;
+    }
+
+    setDone(true);
+    setStep(4);
+  };
+
   const goNext = () => {
     if (step === 3) {
-      setDone(true);
-      setStep(4);
+      confirmarReserva();
       return;
     }
     setStep((s) => Math.min(s + 1, 4));
+  };
+
+  // Construye el enlace de wa.me con el mensaje de confirmación ya escrito
+  const obtenerLinkWhatsApp = () => {
+    const servicios = cart.map((s) => s.name).join(", ");
+    const texto = `¡Hola! Acabo de reservar una cita.%0A%0A*Nombre:* ${form.name}%0A*Servicios:* ${servicios}%0A*Fecha:* ${day?.label} ${day?.month}%0A*Hora:* ${time}%0A*Total:* ${total.toFixed(2)}€%0A%0A¡Confirmo mi cita!`;
+    return `https://wa.me/${TELEFONO_BARBERIA}?text=${texto}`;
   };
 
   const colors = {
@@ -477,6 +520,9 @@ export default function BookingApp() {
                 />
               </div>
             </div>
+            {errorGuardado && (
+              <p style={{ color: "#f87171", fontSize: 12.5, marginTop: 12 }}>{errorGuardado}</p>
+            )}
           </div>
         )}
 
@@ -536,6 +582,27 @@ export default function BookingApp() {
             <div style={{ marginTop: 20, fontSize: 13, color: colors.textMuted }}>
               Reservado a nombre de <strong style={{ color: colors.text }}>{form.name}</strong> · {form.phone}
             </div>
+
+            <a
+              href={obtenerLinkWhatsApp()}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                marginTop: 20,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                background: "#25D366",
+                color: "#0b1a0f",
+                fontWeight: 600,
+                padding: "12px 22px",
+                borderRadius: 8,
+                textDecoration: "none",
+                fontSize: 14,
+              }}
+            >
+              💬 Confirmar por WhatsApp
+            </a>
           </div>
         )}
 
@@ -585,7 +652,7 @@ export default function BookingApp() {
               )}
               <button
                 className="rf-btn"
-                disabled={!canNext}
+                disabled={!canNext || guardando}
                 onClick={goNext}
                 style={{
                   display: "inline-flex",
@@ -598,10 +665,18 @@ export default function BookingApp() {
                   padding: "12px 22px",
                   fontSize: 14,
                   fontWeight: 600,
-                  cursor: canNext ? "pointer" : "not-allowed",
+                  cursor: canNext && !guardando ? "pointer" : "not-allowed",
                 }}
               >
-                {step === 3 ? "Confirmar cita" : "Continuar"} <ChevronRight size={16} />
+                {guardando ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" /> Guardando...
+                  </>
+                ) : (
+                  <>
+                    {step === 3 ? "Confirmar cita" : "Continuar"} <ChevronRight size={16} />
+                  </>
+                )}
               </button>
             </div>
           </div>
